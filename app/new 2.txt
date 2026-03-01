@@ -1,0 +1,220 @@
+"use client";
+
+import { useState, useEffect } from "react";
+import { ethers } from "ethers";
+
+const CASINO_ADDRESS = "0x4735a0825A2d37768bAb6F9Bc5820a8c69e541ee";
+const BASE_CHAIN_ID = 84532;
+
+const ABI = [
+  "function buy() payable",
+  "function flip(bool guess, uint256 amount)",
+  "function balanceOf(address owner) view returns (uint256)",
+  "event Result(address indexed player, bool win, uint256 amount)"
+];
+
+export default function Page() {
+
+  const [provider, setProvider] = useState(null);
+  const [account, setAccount] = useState(null);
+  const [balance, setBalance] = useState("0");
+  const [bet, setBet] = useState("");
+  const [side, setSide] = useState(true);
+  const [status, setStatus] = useState("Ready");
+  const [loading, setLoading] = useState(false);
+  const [balanceLoading, setBalanceLoading] = useState(false);
+
+  useEffect(() => {
+    if (!window.ethereum) return;
+
+    const p = new ethers.BrowserProvider(window.ethereum);
+    setProvider(p);
+
+    const wasConnected = localStorage.getItem("walletConnected");
+
+    if (wasConnected === "true") {
+      window.ethereum.request({ method: "eth_accounts" })
+        .then(async (accounts) => {
+          if (accounts.length > 0) {
+            setAccount(accounts[0]);
+            await loadBalance(accounts[0], p);
+          }
+        });
+    }
+  }, []);
+
+  async function connectWallet() {
+    const p = new ethers.BrowserProvider(window.ethereum);
+    const accounts = await window.ethereum.request({
+      method: "eth_requestAccounts"
+    });
+
+    localStorage.setItem("walletConnected", "true");
+
+    setAccount(accounts[0]);
+    setProvider(p);
+    await loadBalance(accounts[0], p);
+  }
+
+  function disconnectWallet() {
+    localStorage.removeItem("walletConnected");
+    setAccount(null);
+    setBalance("0");
+  }
+
+  async function loadBalance(user, p = provider) {
+    const casino = new ethers.Contract(CASINO_ADDRESS, ABI, p);
+    const bal = await casino.balanceOf(user);
+    setBalance(ethers.formatEther(bal));
+  }
+
+  async function buyRLO(value) {
+    try {
+      setBalanceLoading(true);
+      setStatus("Buying...");
+
+      const signer = await provider.getSigner();
+      const casino = new ethers.Contract(CASINO_ADDRESS, ABI, signer);
+
+      const tx = await casino.buy({
+        value: ethers.parseEther(value)
+      });
+
+      await tx.wait();
+      await loadBalance(account);
+
+      setStatus("RLO Purchased ✅");
+      setBalanceLoading(false);
+
+    } catch (err) {
+      console.log(err);
+      setStatus("Buy failed ❌");
+      setBalanceLoading(false);
+    }
+  }
+
+  async function flipCoin() {
+    if (!bet || Number(bet) <= 0) return;
+    if (loading) return;
+
+    try {
+      setLoading(true);
+      setBalanceLoading(true);
+      setStatus("🎲 Flipping...");
+
+      const signer = await provider.getSigner();
+      const casino = new ethers.Contract(CASINO_ADDRESS, ABI, signer);
+
+      const tx = await casino.flip(side, ethers.parseEther(bet));
+      const receipt = await tx.wait();
+
+      // 🔥 100% ACCURATE EVENT DECODE
+      const iface = new ethers.Interface(ABI);
+
+      let win = false;
+
+      for (const log of receipt.logs) {
+        if (log.address.toLowerCase() === CASINO_ADDRESS.toLowerCase()) {
+          try {
+            const parsed = iface.parseLog(log);
+            if (parsed.name === "Result") {
+              win = parsed.args.win;
+            }
+          } catch {}
+        }
+      }
+
+      await loadBalance(account);
+
+      setStatus(win ? "🎉 YOU WIN!" : "💀 YOU LOSE!");
+
+      setLoading(false);
+      setBalanceLoading(false);
+
+    } catch (err) {
+      console.log(err);
+      setStatus("Transaction failed ❌");
+      setLoading(false);
+      setBalanceLoading(false);
+    }
+  }
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-black via-[#0b1120] to-black text-white flex flex-col lg:flex-row">
+
+      <div className="flex-1 flex flex-col items-center justify-center p-10">
+        <div className={`w-64 h-64 rounded-full bg-gradient-to-br from-yellow-400 to-yellow-700 shadow-[0_0_100px_gold] flex items-center justify-center text-[120px] font-bold ${loading ? "animate-spin" : ""}`}>
+          {side ? "♠" : "♥"}
+        </div>
+        <div className="mt-6 text-xl font-semibold">{status}</div>
+      </div>
+
+      <div className="w-full lg:w-[420px] bg-[#0f172a] border-l border-gray-800 p-8">
+
+        <div className="flex justify-between items-center mb-6">
+          <h2 className="text-xl font-bold">Coin Flip</h2>
+
+          {account ? (
+            <button onClick={disconnectWallet} className="bg-red-600 px-4 py-2 rounded text-sm">
+              Disconnect
+            </button>
+          ) : (
+            <button onClick={connectWallet} className="bg-cyan-600 px-4 py-2 rounded text-sm">
+              Connect Wallet
+            </button>
+          )}
+        </div>
+
+        <div className="mb-4 flex items-center gap-2 text-gray-400">
+          Balance: {Number(balance).toFixed(2)} RLO
+          {balanceLoading && (
+            <div className="w-4 h-4 border-2 border-cyan-400 border-t-transparent rounded-full animate-spin"></div>
+          )}
+        </div>
+
+        <div className="mb-6">
+          <div className="text-sm mb-2 text-gray-400">Buy RLO</div>
+          <div className="flex gap-2">
+            <button onClick={() => buyRLO("0.0000001")} className="flex-1 bg-blue-600 p-2 rounded text-xs">1000</button>
+            <button onClick={() => buyRLO("0.000001")} className="flex-1 bg-blue-600 p-2 rounded text-xs">5000</button>
+            <button onClick={() => buyRLO("0.00001")} className="flex-1 bg-blue-600 p-2 rounded text-xs">10000</button>
+          </div>
+        </div>
+
+        <input
+          type="number"
+          placeholder="Enter amount..."
+          value={bet}
+          onChange={(e) => setBet(e.target.value)}
+          className="w-full p-3 mb-4 bg-gray-800 rounded-xl"
+        />
+
+        <div className="flex gap-3 mb-6">
+          <button
+            onClick={() => setSide(true)}
+            disabled={loading}
+            className={`flex-1 p-3 rounded-xl ${side ? "bg-cyan-600" : "bg-gray-700"}`}
+          >
+            Heads
+          </button>
+          <button
+            onClick={() => setSide(false)}
+            disabled={loading}
+            className={`flex-1 p-3 rounded-xl ${!side ? "bg-cyan-600" : "bg-gray-700"}`}
+          >
+            Tails
+          </button>
+        </div>
+
+        <button
+          onClick={flipCoin}
+          disabled={loading}
+          className="w-full bg-green-600 p-3 rounded-xl disabled:opacity-50"
+        >
+          {loading ? "Processing..." : "Flip Coin"}
+        </button>
+
+      </div>
+    </div>
+  );
+}

@@ -139,7 +139,7 @@ export default function Home() {
 
       {/* FOOTER */}
       <footer className="absolute bottom-6 w-full text-center text-gray-400 text-sm z-10">
-        Created By Juniorrr1945
+        Created By Juniorrr1945 X Sza
       </footer>
 
     </div>
